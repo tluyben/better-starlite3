@@ -171,6 +171,27 @@ This is translated internally for each driver:
 - **best-sqlite3** — rewritten to `$p1`, `$p2` named params
 - **flexdb** — passed through unchanged
 
+## Write serialisation (mutex)
+
+`better-sqlite3` and `best-sqlite3` automatically serialise all write operations
+(`execute()` and transaction `commit()`) through a per-connection async mutex.
+This means it is safe to fire concurrent writes without coordinating callers:
+
+```ts
+// All 20 increments are serialised — no lost updates
+await Promise.all(
+  Array.from({ length: 20 }, () =>
+    db.execute([{ sql: "UPDATE counter SET val = val + 1" }])
+  )
+);
+```
+
+Reads (`query()`) are **not** serialised — WAL mode allows concurrent readers
+on `better-sqlite3`, and `best-sqlite3` reads are synchronous.
+
+FlexDB handles write serialisation server-side via RAFT consensus, so no
+client-side mutex is needed for that driver.
+
 ## WAL mode
 
 `better-sqlite3` and `best-sqlite3` automatically open in WAL journal mode

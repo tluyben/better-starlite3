@@ -3,6 +3,7 @@ import type { DatabaseClient } from "./types.js";
 import { warnIfUnsupported } from "./warnings.js";
 import { makeQueryResponse, objectRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForBetterSqlite3 } from "./params.js";
+import { AsyncMutex } from "./mutex.js";
 
 async function loadDriver() {
   try {
@@ -37,6 +38,7 @@ function execStatement(
 
 function buildTransactionHandle(
   db: import("better-sqlite3").Database,
+  writeMu: AsyncMutex,
 ): TransactionHandle {
   const pending: Statement[] = [];
   let done = false;
@@ -58,11 +60,13 @@ function buildTransactionHandle(
       return makeQueryResponse([], "better-sqlite3");
     },
 
-    async commit() {
+    commit() {
       if (done) throw new Error("Transaction already closed");
       done = true;
-      db.transaction(() => pending.forEach((s) => execStatement(db, s)))();
-      return { status: "committed" as const, transaction_id: id, raft_index: 0 };
+      return writeMu.run(() => {
+        db.transaction(() => pending.forEach((s) => execStatement(db, s)))();
+        return { status: "committed" as const, transaction_id: id, raft_index: 0 };
+      });
     },
 
     async rollback() {
@@ -83,33 +87,36 @@ export async function openBetterSQLite3(
   const db = new Database(filename);
   if (wal) db.pragma("journal_mode = WAL");
 
+  const writeMu = new AsyncMutex();
+
   const client: DatabaseClient = {
     driver: "better-sqlite3",
 
     async query(statements, _consistency?) {
+      // Reads are not serialised — WAL allows concurrent readers
       const stmts = Array.isArray(statements) ? statements : [statements];
       return makeQueryResponse(stmts.map((s) => execStatement(db, s)), "better-sqlite3");
     },
 
-    async execute(statements) {
+    execute(statements) {
       const stmts = Array.isArray(statements) ? statements : [statements];
-      return makeQueryResponse(stmts.map((s) => execStatement(db, s)), "better-sqlite3");
+      return writeMu.run(() =>
+        makeQueryResponse(stmts.map((s) => execStatement(db, s)), "better-sqlite3"),
+      );
     },
 
     async beginTransaction() {
-      return buildTransactionHandle(db);
+      return buildTransactionHandle(db, writeMu);
     },
 
-    async transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
-      const tx = buildTransactionHandle(db);
-      try {
-        const result = await fn(tx);
-        await tx.commit();
-        return result;
-      } catch (err) {
-        try { await tx.rollback(); } catch { /* ignore */ }
-        throw err;
-      }
+    transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
+      const tx = buildTransactionHandle(db, writeMu);
+      return fn(tx)
+        .then((result) => tx.commit().then(() => result))
+        .catch(async (err) => {
+          try { await tx.rollback(); } catch { /* ignore */ }
+          throw err;
+        });
     },
 
     destroy() {

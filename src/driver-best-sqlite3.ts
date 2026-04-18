@@ -3,6 +3,7 @@ import type { DatabaseClient } from "./types.js";
 import { warnIfUnsupported } from "./warnings.js";
 import { makeQueryResponse, objectRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForSqlJs } from "./params.js";
+import { AsyncMutex } from "./mutex.js";
 import BestSqlite from "best-sqlite3";
 
 type BestDB = InstanceType<typeof BestSqlite>;
@@ -21,7 +22,7 @@ function execStatement(db: BestDB, stmt: Statement): import("flexdb-node").State
   return emptyResult(res.rowsModified ?? 0, res.lastInsertRowId ?? null, elapsed(start));
 }
 
-function buildTransactionHandle(db: BestDB): TransactionHandle {
+function buildTransactionHandle(db: BestDB, writeMu: AsyncMutex): TransactionHandle {
   const pending: Statement[] = [];
   let done = false;
   const id = `best-tx-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -42,11 +43,13 @@ function buildTransactionHandle(db: BestDB): TransactionHandle {
       return makeQueryResponse([], "best-sqlite3");
     },
 
-    async commit() {
+    commit() {
       if (done) throw new Error("Transaction already closed");
       done = true;
-      pending.forEach((s) => execStatement(db, s));
-      return { status: "committed" as const, transaction_id: id, raft_index: 0 };
+      return writeMu.run(() => {
+        pending.forEach((s) => execStatement(db, s));
+        return { status: "committed" as const, transaction_id: id, raft_index: 0 };
+      });
     },
 
     async rollback() {
@@ -70,36 +73,37 @@ export async function openBestSQLite3(
     );
   }
 
-  // best-sqlite3 requires async connect() to load sql.js WASM
   const db = await BestSqlite.connect(filename) as BestDB;
+  const writeMu = new AsyncMutex();
 
   const client: DatabaseClient = {
     driver: "best-sqlite3",
 
     async query(statements, _consistency?) {
+      // Reads are not serialised
       const stmts = Array.isArray(statements) ? statements : [statements];
       return makeQueryResponse(stmts.map((s) => execStatement(db, s)), "best-sqlite3");
     },
 
-    async execute(statements) {
+    execute(statements) {
       const stmts = Array.isArray(statements) ? statements : [statements];
-      return makeQueryResponse(stmts.map((s) => execStatement(db, s)), "best-sqlite3");
+      return writeMu.run(() =>
+        makeQueryResponse(stmts.map((s) => execStatement(db, s)), "best-sqlite3"),
+      );
     },
 
     async beginTransaction() {
-      return buildTransactionHandle(db);
+      return buildTransactionHandle(db, writeMu);
     },
 
-    async transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
-      const tx = buildTransactionHandle(db);
-      try {
-        const result = await fn(tx);
-        await tx.commit();
-        return result;
-      } catch (err) {
-        try { await tx.rollback(); } catch { /* ignore */ }
-        throw err;
-      }
+    transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
+      const tx = buildTransactionHandle(db, writeMu);
+      return fn(tx)
+        .then((result) => tx.commit().then(() => result))
+        .catch(async (err) => {
+          try { await tx.rollback(); } catch { /* ignore */ }
+          throw err;
+        });
     },
 
     destroy() {
