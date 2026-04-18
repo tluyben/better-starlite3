@@ -1,0 +1,4 @@
+3rdparty/
+node_modules/
+dist/
+*.js.map
