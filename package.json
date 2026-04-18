@@ -1,8 +1,8 @@
 {
   "name": "better-starlite3",
   "version": "1.0.0",
-  "description": "Unified async SQLite API wrapping better-sqlite3, best-sqlite3, and flexdb-node",
-  "keywords": ["sqlite", "better-sqlite3", "best-sqlite3", "flexdb", "database", "async"],
+  "description": "Unified async SQLite API wrapping better-sqlite3, best-sqlite3, better-starlite, and flexdb-node",
+  "keywords": ["sqlite", "better-sqlite3", "best-sqlite3", "better-starlite", "flexdb", "database", "async"],
   "author": "Tycho Andersen",
   "license": "MIT",
   "type": "module",
@@ -29,12 +29,14 @@
   "peerDependencies": {
     "better-sqlite3": ">=9.0.0",
     "best-sqlite3": ">=1.0.0",
-    "flexdb-node": ">=0.1.0"
+    "flexdb-node": ">=0.1.0",
+    "better-starlite": ">=0.2.0"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": { "optional": true },
     "best-sqlite3": { "optional": true },
-    "flexdb-node": { "optional": true }
+    "flexdb-node": { "optional": true },
+    "better-starlite": { "optional": true }
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -42,6 +44,7 @@
     "better-sqlite3": "^12.9.0",
     "best-sqlite3": "^1.0.19",
     "flexdb-node": "file:./3rdparty/flexdb-node",
+    "better-starlite": "file:./3rdparty/better-starlite",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }

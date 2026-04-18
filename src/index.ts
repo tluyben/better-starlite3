@@ -12,12 +12,14 @@ export type {
   BetterSQLite3Options,
   BestSQLite3Options,
   FlexDBOptions,
+  BetterStarliteOptions,
 } from "./types.js";
 
 import type { DatabaseClient, OpenOptions } from "./types.js";
 import { openBetterSQLite3 } from "./driver-better-sqlite3.js";
 import { openBestSQLite3 } from "./driver-best-sqlite3.js";
 import { openFlexDB } from "./driver-flexdb.js";
+import { openBetterStarlite } from "./driver-better-starlite.js";
 
 /**
  * Open a database connection using one of the three supported drivers.
@@ -41,6 +43,9 @@ import { openFlexDB } from "./driver-flexdb.js";
  *
  * // Local SQLite with best-sqlite3 (pure-JS/WASM)
  * const db = await open({ driver: "best-sqlite3", filename: "myapp.db" });
+ *
+ * // Local SQLite with better-starlite (async better-sqlite3 wrapper)
+ * const db = await open({ driver: "better-starlite", filename: "myapp.db" });
  *
  * // Remote FlexDB cluster
  * const db = await open({
@@ -68,10 +73,12 @@ export async function open(options: OpenOptions): Promise<DatabaseClient> {
         healthCheckIntervalMs: options.healthCheckIntervalMs,
         timeoutMs: options.timeoutMs,
       });
+    case "better-starlite":
+      return openBetterStarlite(options.filename, options.wal ?? true);
     default: {
       const d = (options as { driver: string }).driver;
       throw new Error(
-        `[better-starlite3] Unknown driver "${d}". Valid: better-sqlite3, best-sqlite3, flexdb`,
+        `[better-starlite3] Unknown driver "${d}". Valid: better-sqlite3, best-sqlite3, flexdb, better-starlite`,
       );
     }
   }

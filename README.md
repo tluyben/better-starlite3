@@ -1,6 +1,6 @@
 # better-starlite3
 
-A unified async SQLite client that wraps **better-sqlite3**, **best-sqlite3**, and **flexdb-node** behind a single API. Switch between drivers with one option change — the rest of your code is identical.
+A unified async SQLite client that wraps **better-sqlite3**, **best-sqlite3**, **better-starlite**, and **flexdb-node** behind a single API. Switch between drivers with one option change — the rest of your code is identical.
 
 ## Installation
 
@@ -11,9 +11,10 @@ npm install better-starlite3
 Install whichever driver(s) you need:
 
 ```bash
-npm install better-sqlite3   # native SQLite (fastest, WAL auto-enabled)
-npm install best-sqlite3     # pure-JS/WASM SQLite (no native build required)
-npm install flexdb-node      # distributed FlexDB cluster
+npm install better-sqlite3    # native SQLite (fastest, WAL auto-enabled)
+npm install best-sqlite3      # pure-JS/WASM SQLite (no native build required)
+npm install better-starlite   # async better-sqlite3 wrapper with rqlite support
+npm install flexdb-node       # distributed FlexDB cluster
 ```
 
 ## Quick start
@@ -21,7 +22,7 @@ npm install flexdb-node      # distributed FlexDB cluster
 ```ts
 import { open } from "better-starlite3";
 
-// Open with any driver — same API for all three
+// Open with any driver — same API for all four
 const db = await open({ driver: "better-sqlite3", filename: "myapp.db" });
 
 // Write
@@ -46,8 +47,11 @@ db.destroy();
 ## Switching drivers
 
 ```ts
-// Local development — native SQLite
+// Local development — native SQLite (synchronous internally)
 const db = await open({ driver: "better-sqlite3", filename: "dev.db" });
+
+// Local development — async better-sqlite3 wrapper with rqlite/FlexDB support
+const db = await open({ driver: "better-starlite", filename: "dev.db" });
 
 // CI / serverless — pure-JS SQLite, no native build
 const db = await open({ driver: "best-sqlite3", filename: "data.db" });
@@ -60,7 +64,7 @@ const db = await open({
 });
 ```
 
-The `query`, `execute`, `beginTransaction`, `transaction`, and `destroy` methods work identically across all three.
+The `query`, `execute`, `beginTransaction`, `transaction`, and `destroy` methods work identically across all four.
 
 ## API
 
@@ -83,6 +87,15 @@ Opens a database connection.
   driver: "best-sqlite3";
   filename: string;   // file path (WAL not supported by this driver)
   wal?: boolean;      // accepted but ignored with a warning
+}
+```
+
+**better-starlite options:**
+```ts
+{
+  driver: "better-starlite";
+  filename: string;   // file path or ":memory:"
+  wal?: boolean;      // default: true — opens in WAL mode automatically
 }
 ```
 
@@ -139,7 +152,7 @@ Close the database / stop FlexDB background health checks. Always call when done
 
 ## QueryResponse shape
 
-All three drivers return the same structure:
+All four drivers return the same structure:
 
 ```ts
 {
@@ -168,6 +181,7 @@ All drivers accept FlexDB-style numbered parameters (`?1`, `?2`, etc.):
 
 This is translated internally for each driver:
 - **better-sqlite3** — rewritten to `?`, `?` anonymous params
+- **better-starlite** — rewritten to `?`, `?` anonymous params (same as better-sqlite3)
 - **best-sqlite3** — rewritten to `$p1`, `$p2` named params
 - **flexdb** — passed through unchanged
 
@@ -175,6 +189,7 @@ This is translated internally for each driver:
 
 `better-sqlite3` and `best-sqlite3` automatically serialise all write operations
 (`execute()` and transaction `commit()`) through a per-connection async mutex.
+`better-starlite` uses its own internal per-file write mutex.
 This means it is safe to fire concurrent writes without coordinating callers:
 
 ```ts
@@ -187,14 +202,14 @@ await Promise.all(
 ```
 
 Reads (`query()`) are **not** serialised — WAL mode allows concurrent readers
-on `better-sqlite3`, and `best-sqlite3` reads are synchronous.
+on `better-sqlite3` and `better-starlite`, and `best-sqlite3` reads are synchronous.
 
 FlexDB handles write serialisation server-side via RAFT consensus, so no
 client-side mutex is needed for that driver.
 
 ## WAL mode
 
-`better-sqlite3` and `best-sqlite3` automatically open in WAL journal mode
+`better-sqlite3`, `better-starlite`, and `best-sqlite3` automatically open in WAL journal mode
 (`wal: true` default), which means **you do not need** `PRAGMA journal_mode`,
 `PRAGMA synchronous`, or similar pragmas.
 
@@ -207,7 +222,7 @@ client-side mutex is needed for that driver.
 - **Dot-commands** (`.tables`, `.mode`, etc.) — these are SQLite CLI-only and
   are not valid SQL. They will fail on FlexDB and programmatic drivers.
 
-These warnings fire on all three drivers so you notice portability issues early.
+These warnings fire on all four drivers so you notice portability issues early.
 
 ```
 [better-starlite3] PRAGMA detected on driver "better-sqlite3": PRAGMA journal_mode
@@ -217,26 +232,32 @@ These warnings fire on all three drivers so you notice portability issues early.
 
 ## Limitations
 
-| Feature | better-sqlite3 | best-sqlite3 | flexdb |
-|---|---|---|---|
-| WAL mode | ✅ auto | ❌ n/a (WASM) | ✅ server-managed |
-| Atomic transactions | ✅ native | ⚠️ sequential commit | ✅ RAFT |
-| In-memory database | ✅ `:memory:` | ✅ (no filename) | ❌ |
-| Full-text search | ❌ | ❌ | ✅ via FlexDB API |
-| Cluster / replication | ❌ | ❌ | ✅ |
+| Feature | better-sqlite3 | best-sqlite3 | better-starlite | flexdb |
+|---|---|---|---|---|
+| WAL mode | ✅ auto | ❌ n/a (WASM) | ✅ auto | ✅ server-managed |
+| Atomic transactions | ✅ native | ⚠️ sequential commit | ✅ native | ✅ RAFT |
+| In-memory database | ✅ `:memory:` | ✅ (no filename) | ✅ `:memory:` | ❌ |
+| Full-text search | ❌ | ❌ | ❌ | ✅ via FlexDB API |
+| Cluster / replication | ❌ | ❌ | ❌ | ✅ |
+| rqlite support | ❌ | ❌ | ✅ via URL | ❌ |
 
-**best-sqlite3 transactions**: The `best-sqlite3` driver has no native transaction API. Statements are buffered and executed sequentially on commit. This means a mid-transaction crash could leave partial writes. Use `better-sqlite3` or FlexDB when atomicity matters.
+**best-sqlite3 transactions**: The `best-sqlite3` driver has no native transaction API. Statements are buffered and executed sequentially on commit. This means a mid-transaction crash could leave partial writes. Use `better-sqlite3`, `better-starlite`, or FlexDB when atomicity matters.
 
 ## 3rdparty directory
 
-When developing this package locally, run:
+When developing this package locally, clone both 3rdparty dependencies:
 
 ```bash
 git clone https://github.com/tluyben/flexdb-node.git 3rdparty/flexdb-node
-cd 3rdparty/flexdb-node && npm install && npm run build
+cd 3rdparty/flexdb-node && npm install && npm run build && cd ../..
+
+git clone https://github.com/tluyben/better-starlite.git 3rdparty/better-starlite
+cd 3rdparty/better-starlite && npm install && npm run build && cd ../..
+
+npm install
 ```
 
-The `3rdparty/` directory is git-ignored and used as the local `flexdb-node` dev dependency.
+The `3rdparty/` directory is git-ignored and used as the local dev dependencies for these packages.
 
 ## License
 

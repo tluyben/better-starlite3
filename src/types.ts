@@ -25,7 +25,7 @@ export type {
   FlexDBClientOptions,
 } from "flexdb-node";
 
-export type DriverName = "better-sqlite3" | "best-sqlite3" | "flexdb";
+export type DriverName = "better-sqlite3" | "best-sqlite3" | "flexdb" | "better-starlite";
 
 export interface SQLiteDriverOptions {
   /** Local SQLite database file path. Use ":memory:" for in-memory database. */
@@ -54,7 +54,11 @@ export interface FlexDBOptions {
   timeoutMs?: number;
 }
 
-export type OpenOptions = BetterSQLite3Options | BestSQLite3Options | FlexDBOptions;
+export interface BetterStarliteOptions extends SQLiteDriverOptions {
+  driver: "better-starlite";
+}
+
+export type OpenOptions = BetterSQLite3Options | BestSQLite3Options | FlexDBOptions | BetterStarliteOptions;
 
 /** The unified client interface — same shape as FlexDBClient for the core API. */
 export interface DatabaseClient {
