@@ -86,6 +86,7 @@ export async function openBetterSQLite3(
   const Database = await loadDriver();
   const db = new Database(filename);
   if (wal) db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
 
   const writeMu = new AsyncMutex();
 

@@ -74,6 +74,7 @@ export async function openBestSQLite3(
   }
 
   const db = await BestSqlite.connect(filename) as BestDB;
+  db.run("PRAGMA foreign_keys = ON");
   const writeMu = new AsyncMutex();
 
   const client: DatabaseClient = {
