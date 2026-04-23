@@ -24,5 +24,6 @@ export async function openFlexDB(options: Omit<FlexDBClientOptions, never>): Pro
     beginTransaction: client.beginTransaction.bind(client),
     transaction: client.transaction.bind(client),
     destroy: client.destroy.bind(client),
+    get honker() { return client.honker; },
   };
 }

@@ -23,6 +23,32 @@ export type {
   AnalyticsRebuildResponse,
   AnalyticalTable,
   FlexDBClientOptions,
+  // Honker types
+  HonkerClient,
+  HonkerQueue,
+  HonkerStream,
+  HonkerNotification,
+  HonkerLock,
+  HonkerRateLimit,
+  HonkerScheduler,
+  HonkerJobs,
+  HonkerStatusResponse,
+  EnqueueOptions,
+  EnqueueResponse,
+  ClaimOptions,
+  JobItem,
+  RetryOptions,
+  QueueStats,
+  StreamEvent,
+  ReadEventsOptions,
+  OffsetResponse,
+  NotificationItem,
+  PollOptions,
+  RateLimitOptions,
+  RateLimitResponse,
+  RegisterHandlerOptions,
+  SchedulerHandler,
+  SchedulerNextResponse,
 } from "flexdb-node";
 
 export type DriverName = "better-sqlite3" | "best-sqlite3" | "flexdb" | "better-starlite";
@@ -83,4 +109,12 @@ export interface DatabaseClient {
 
   /** Release resources (stop health checks, close db, etc.). */
   destroy(): void;
+
+  /**
+   * Honker client: queues, streams, notifications, locks, rate limits, scheduler.
+   * Only available on the "flexdb" driver. SQLite drivers do not expose this.
+   * All methods throw `FlexDBHonkerUnavailableError` when the server was not
+   * compiled with `--features honker`.
+   */
+  honker?: import("flexdb-node").HonkerClient;
 }

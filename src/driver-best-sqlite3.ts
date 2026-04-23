@@ -58,6 +58,10 @@ function buildTransactionHandle(db: BestDB, writeMu: AsyncMutex): TransactionHan
       pending.length = 0;
       return { status: "rolled_back" as const, transaction_id: id };
     },
+
+    enqueue(): never {
+      throw new Error("[better-starlite3] honker is only available with the flexdb driver");
+    },
   };
   return handle;
 }
