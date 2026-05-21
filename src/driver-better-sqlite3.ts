@@ -96,9 +96,55 @@ export async function openBetterSQLite3(
 
   const client: DatabaseClient = {
     driver: "better-sqlite3",
+    _raw: db,
 
     async query(statements, _consistency?) {
       // Reads are not serialised — WAL allows concurrent readers
+      const stmts = Array.isArray(statements) ? statements : [statements];
+      return makeQueryResponse(stmts.map((s) => execStatement(db, s)), "better-sqlite3");
+    },
+
+    execute(statements) {
+      const stmts = Array.isArray(statements) ? statements : [statements];
+      return writeMu.run(() =>
+        makeQueryResponse(stmts.map((s) => execStatement(db, s)), "better-sqlite3"),
+      );
+    },
+
+    async beginTransaction() {
+      return buildTransactionHandle(db, writeMu);
+    },
+
+    transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
+      const tx = buildTransactionHandle(db, writeMu);
+      return fn(tx)
+        .then((result) => tx.commit().then(() => result))
+        .catch(async (err) => {
+          try { await tx.rollback(); } catch { /* ignore */ }
+          throw err;
+        });
+    },
+
+    destroy() {
+      db.close();
+    },
+  };
+  return client;
+}
+
+/**
+ * Wrap an already-opened better-sqlite3 Database instance in a DatabaseClient.
+ * Useful when initialization is synchronous and you want to expose the unified API
+ * without going through the async `open()` path.
+ */
+export function wrapBetterSQLite3(db: import("better-sqlite3").Database): DatabaseClient {
+  const writeMu = new AsyncMutex();
+
+  const client: DatabaseClient = {
+    driver: "better-sqlite3",
+    _raw: db,
+
+    async query(statements, _consistency?) {
       const stmts = Array.isArray(statements) ? statements : [statements];
       return makeQueryResponse(stmts.map((s) => execStatement(db, s)), "better-sqlite3");
     },

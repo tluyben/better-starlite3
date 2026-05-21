@@ -42,10 +42,12 @@ export type {
 } from "./types.js";
 
 import type { DatabaseClient, OpenOptions } from "./types.js";
-import { openBetterSQLite3 } from "./driver-better-sqlite3.js";
+import { openBetterSQLite3, wrapBetterSQLite3 } from "./driver-better-sqlite3.js";
 import { openBestSQLite3 } from "./driver-best-sqlite3.js";
 import { openFlexDB } from "./driver-flexdb.js";
 import { openBetterStarlite } from "./driver-better-starlite.js";
+
+export { wrapBetterSQLite3 };
 
 /**
  * Open a database connection using one of the three supported drivers.

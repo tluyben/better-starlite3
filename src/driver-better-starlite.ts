@@ -9,7 +9,10 @@ async function loadDriver(): Promise<{
 }> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mod = await import("better-starlite/dist/async-unified") as unknown as BetterStarliteModule;
+    // Dynamic path prevents TS from resolving the optional peer dep at build time
+    const pkg = "better-starlite/dist/async-unified";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mod = await import(pkg as any) as unknown as BetterStarliteModule;
     return { createDatabase: mod.createDatabase };
   } catch {
     throw new Error(

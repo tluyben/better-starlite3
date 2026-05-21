@@ -90,6 +90,13 @@ export type OpenOptions = BetterSQLite3Options | BestSQLite3Options | FlexDBOpti
 export interface DatabaseClient {
   readonly driver: DriverName;
 
+  /**
+   * Exposes the underlying driver instance when driver is "better-sqlite3".
+   * Useful for code that needs the synchronous better-sqlite3 API during migration.
+   * Will be undefined for other drivers.
+   */
+  readonly _raw?: import("better-sqlite3").Database;
+
   /** Execute one or more SQL statements (reads or writes). */
   query(
     statements: import("flexdb-node").Statement | import("flexdb-node").Statement[],

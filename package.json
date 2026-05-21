@@ -6,21 +6,23 @@
   "author": "Tycho Andersen",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist-cjs/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist-cjs/index.js",
+      "default": "./dist-cjs/index.js",
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "dist-cjs", "README.md"],
   "engines": { "node": ">=18.0.0" },
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json && tsc --project tsconfig.build.cjs.json && echo '{\"type\":\"commonjs\"}' > dist-cjs/package.json",
     "build:watch": "tsc --project tsconfig.build.json --watch",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-cjs",
     "prebuild": "npm run clean",
     "test": "node --import tsx/esm --test 'tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
@@ -43,8 +45,7 @@
     "@types/node": "^25.6.0",
     "better-sqlite3": "^12.9.0",
     "best-sqlite3": "^1.0.19",
-    "flexdb-node": "file:./3rdparty/flexdb-node",
-    "better-starlite": "file:./3rdparty/better-starlite",
+    "flexdb-node": "*",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }
