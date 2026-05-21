@@ -24,6 +24,7 @@
     "build:watch": "tsc --project tsconfig.build.json --watch",
     "clean": "rm -rf dist dist-cjs",
     "prebuild": "npm run clean",
+    "prepare": "npm run build",
     "test": "node --import tsx/esm --test 'tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run typecheck"
