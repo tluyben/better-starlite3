@@ -2,7 +2,15 @@
   "name": "better-starlite3",
   "version": "1.0.0",
   "description": "Unified async SQLite API wrapping better-sqlite3, best-sqlite3, better-starlite, and flexdb-node",
-  "keywords": ["sqlite", "better-sqlite3", "best-sqlite3", "better-starlite", "flexdb", "database", "async"],
+  "keywords": [
+    "sqlite",
+    "better-sqlite3",
+    "best-sqlite3",
+    "better-starlite",
+    "flexdb",
+    "database",
+    "async"
+  ],
   "author": "Tycho Andersen",
   "license": "MIT",
   "type": "module",
@@ -17,14 +25,20 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "dist-cjs", "README.md"],
-  "engines": { "node": ">=18.0.0" },
+  "files": [
+    "dist",
+    "dist-cjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.build.json && tsc --project tsconfig.build.cjs.json && echo '{\"type\":\"commonjs\"}' > dist-cjs/package.json",
     "build:watch": "tsc --project tsconfig.build.json --watch",
     "clean": "rm -rf dist dist-cjs",
     "prebuild": "npm run clean",
-    "prepare": "npm run build",
+    "prepare": "test -f dist/index.d.ts || npm run build",
     "test": "node --import tsx/esm --test 'tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run typecheck"
@@ -36,10 +50,18 @@
     "better-starlite": ">=0.2.0"
   },
   "peerDependenciesMeta": {
-    "better-sqlite3": { "optional": true },
-    "best-sqlite3": { "optional": true },
-    "flexdb-node": { "optional": true },
-    "better-starlite": { "optional": true }
+    "better-sqlite3": {
+      "optional": true
+    },
+    "best-sqlite3": {
+      "optional": true
+    },
+    "flexdb-node": {
+      "optional": true
+    },
+    "better-starlite": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
