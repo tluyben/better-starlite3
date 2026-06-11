@@ -1,7 +1,7 @@
 import type { QueryResponse, Statement, TransactionHandle } from "flexdb-node";
 import type { DatabaseClient } from "./types.js";
 import { warnIfUnsupported } from "./warnings.js";
-import { makeQueryResponse, objectRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
+import { makeQueryResponse, objectRowsToResult, arrayRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForBetterSqlite3 } from "./params.js";
 
 async function loadDriver(): Promise<{
@@ -27,6 +27,10 @@ async function loadDriver(): Promise<{
 interface BetterStarliteStatement {
   run(...params: unknown[]): Promise<{ changes: number; lastInsertRowid: number | bigint }>;
   all(...params: unknown[]): Promise<Record<string, unknown>[]>;
+  // Optional better-sqlite3-compatible positional API. When present it is used
+  // so duplicate-named join columns survive (see arrayRowsToResult).
+  raw?(toggle?: boolean): BetterStarliteStatement;
+  columns?(): Array<{ name: string }>;
   reader: boolean;
 }
 
@@ -49,6 +53,12 @@ async function execStatement(
   const start = hrNow();
   const prepared = await db.prepare(sql);
   if (prepared.reader) {
+    // Prefer positional reads so duplicate-named join columns are preserved.
+    if (typeof prepared.raw === "function" && typeof prepared.columns === "function") {
+      const columns = prepared.columns().map((c) => c.name);
+      const rows = (await prepared.raw().all(...params)) as unknown as unknown[][];
+      return arrayRowsToResult(columns, rows, elapsed(start));
+    }
     const rows = await prepared.all(...params) as Record<string, unknown>[];
     return objectRowsToResult(rows, 0, null, elapsed(start));
   }

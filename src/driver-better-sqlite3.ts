@@ -1,7 +1,7 @@
 import type { QueryResponse, Statement, TransactionHandle } from "flexdb-node";
 import type { DatabaseClient } from "./types.js";
 import { warnIfUnsupported } from "./warnings.js";
-import { makeQueryResponse, objectRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
+import { makeQueryResponse, arrayRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForBetterSqlite3 } from "./params.js";
 import { AsyncMutex } from "./mutex.js";
 
@@ -25,8 +25,13 @@ function execStatement(
   const start = hrNow();
   const prepared = db.prepare(sql);
   if (prepared.reader) {
-    const rows = prepared.all(...params) as Record<string, unknown>[];
-    return objectRowsToResult(rows, 0, null, elapsed(start));
+    // Read rows POSITIONALLY (.raw()) so a join that selects two same-named
+    // columns (e.g. a.id + b.id) keeps every column — an object keyed by name
+    // would drop the duplicate and misalign every later field for ORMs that map
+    // results by position (Drizzle).
+    const columns = prepared.columns().map((c) => c.name);
+    const rows = prepared.raw().all(...params) as unknown[][];
+    return arrayRowsToResult(columns, rows, elapsed(start));
   }
   const info = prepared.run(...params);
   return emptyResult(

@@ -32,6 +32,29 @@ export function objectRowsToResult(
   };
 }
 
+/**
+ * Convert POSITIONAL rows (a column-name list + value arrays) to a
+ * StatementResult.
+ *
+ * Prefer this over objectRowsToResult for reads. A row object keyed by column
+ * name silently drops duplicate columns — `SELECT a.id, b.id … FROM a JOIN b`
+ * keeps only one `id` — which misaligns every later field. Drizzle and other
+ * ORMs map result rows by POSITION, so the duplicate columns must be preserved.
+ */
+export function arrayRowsToResult(
+  columns: string[],
+  rows: unknown[][],
+  timeNs: number,
+): StatementResult {
+  return {
+    columns,
+    rows: rows.map((r) => r.map((v) => (v as string | number | boolean | null) ?? null)),
+    rows_affected: 0,
+    last_insert_id: null,
+    time_ns: timeNs,
+  };
+}
+
 export function emptyResult(
   rowsAffected: number,
   lastInsertId: number | null,
