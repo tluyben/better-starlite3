@@ -28,9 +28,11 @@ interface BetterStarliteStatement {
   run(...params: unknown[]): Promise<{ changes: number; lastInsertRowid: number | bigint }>;
   all(...params: unknown[]): Promise<Record<string, unknown>[]>;
   // Optional better-sqlite3-compatible positional API. When present it is used
-  // so duplicate-named join columns survive (see arrayRowsToResult).
-  raw?(toggle?: boolean): BetterStarliteStatement;
-  columns?(): Array<{ name: string }>;
+  // so duplicate-named join columns survive (see arrayRowsToResult). Both may be
+  // sync (older better-starlite) OR async (newer) and columns() may be undefined —
+  // execStatement awaits and falls back accordingly.
+  raw?(toggle?: boolean): BetterStarliteStatement | Promise<BetterStarliteStatement>;
+  columns?(): Array<{ name: string }> | undefined | Promise<Array<{ name: string }> | undefined>;
   reader: boolean;
 }
 
@@ -54,10 +56,16 @@ async function execStatement(
   const prepared = await db.prepare(sql);
   if (prepared.reader) {
     // Prefer positional reads so duplicate-named join columns are preserved.
+    // columns()/raw() may be sync or async (await handles both), and columns()
+    // may be undefined — fall back to the object path when it is.
     if (typeof prepared.raw === "function" && typeof prepared.columns === "function") {
-      const columns = prepared.columns().map((c) => c.name);
-      const rows = (await prepared.raw().all(...params)) as unknown as unknown[][];
-      return arrayRowsToResult(columns, rows, elapsed(start));
+      const colDefs = await prepared.columns();
+      if (colDefs && colDefs.length > 0) {
+        const columns = colDefs.map((c) => c.name);
+        const rawStmt = await prepared.raw(true);
+        const rows = (await rawStmt.all(...params)) as unknown as unknown[][];
+        return arrayRowsToResult(columns, rows, elapsed(start));
+      }
     }
     const rows = await prepared.all(...params) as Record<string, unknown>[];
     return objectRowsToResult(rows, 0, null, elapsed(start));
