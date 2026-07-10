@@ -8,11 +8,12 @@ async function loadDriver(): Promise<{
   createDatabase: (filename: string, options: Record<string, unknown>) => Promise<BetterStarliteDB>;
 }> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // Dynamic path prevents TS from resolving the optional peer dep at build time
-    const pkg = "better-starlite/dist/async-unified";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mod = await import(pkg as any) as unknown as BetterStarliteModule;
+    // Static specifier so bundlers (Next/webpack) can externalize it via
+    // serverExternalPackages and resolve it at runtime. (A variable specifier emits
+    // a "Critical dependency: the request of a dependency is an expression" warning
+    // and is NOT externalized, so the require fails inside the server bundle.)
+    // @ts-ignore — better-starlite is an optional peer dep, resolved at runtime.
+    const mod = await import("better-starlite/dist/async-unified") as unknown as BetterStarliteModule;
     return { createDatabase: mod.createDatabase };
   } catch {
     throw new Error(
