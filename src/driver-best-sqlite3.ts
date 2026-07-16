@@ -79,6 +79,8 @@ export async function openBestSQLite3(
 
   const db = await BestSqlite.connect(filename) as BestDB;
   db.run("PRAGMA foreign_keys = ON");
+  // Wait up to 5s for a lock instead of failing immediately with SQLITE_BUSY.
+  db.run("PRAGMA busy_timeout = 5000");
   const writeMu = new AsyncMutex();
 
   const client: DatabaseClient = {

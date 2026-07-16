@@ -96,6 +96,10 @@ export async function openBetterSQLite3(
   const db = new Database(filename);
   if (wal) db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // Wait up to 5s for a lock instead of failing immediately with SQLITE_BUSY.
+  // Deployments serialise to a single writer, but this makes brief contention
+  // (e.g. concurrent startup tasks, WAL checkpointer) safe rather than throwing.
+  db.pragma("busy_timeout = 5000");
 
   const writeMu = new AsyncMutex();
 
