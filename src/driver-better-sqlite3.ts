@@ -4,6 +4,7 @@ import { warnIfUnsupported } from "./warnings.js";
 import { makeQueryResponse, arrayRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForBetterSqlite3 } from "./params.js";
 import { AsyncMutex } from "./mutex.js";
+import { resolveSynchronous } from "./sqlite-tuning.js";
 
 async function loadDriver() {
   try {
@@ -100,6 +101,9 @@ export async function openBetterSQLite3(
   // Deployments serialise to a single writer, but this makes brief contention
   // (e.g. concurrent startup tasks, WAL checkpointer) safe rather than throwing.
   db.pragma("busy_timeout = 5000");
+  // Durability vs speed — NORMAL by default (safe under WAL for most apps),
+  // FULL for banking-grade durability. See resolveSynchronous().
+  db.pragma(`synchronous = ${resolveSynchronous()}`);
 
   const writeMu = new AsyncMutex();
 

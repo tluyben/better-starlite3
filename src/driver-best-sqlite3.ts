@@ -4,6 +4,7 @@ import { warnIfUnsupported } from "./warnings.js";
 import { makeQueryResponse, objectRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForSqlJs } from "./params.js";
 import { AsyncMutex } from "./mutex.js";
+import { resolveSynchronous } from "./sqlite-tuning.js";
 import BestSqlite from "best-sqlite3";
 
 type BestDB = InstanceType<typeof BestSqlite>;
@@ -81,6 +82,8 @@ export async function openBestSQLite3(
   db.run("PRAGMA foreign_keys = ON");
   // Wait up to 5s for a lock instead of failing immediately with SQLITE_BUSY.
   db.run("PRAGMA busy_timeout = 5000");
+  // Durability vs speed — NORMAL by default, FULL for banking-grade durability.
+  db.run(`PRAGMA synchronous = ${resolveSynchronous()}`);
   const writeMu = new AsyncMutex();
 
   const client: DatabaseClient = {
