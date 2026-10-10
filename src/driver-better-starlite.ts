@@ -149,10 +149,16 @@ function useWorkerPool(filename: string, env = process.env): boolean {
   return typeof (globalThis as { Bun?: unknown }).Bun === "undefined";
 }
 
+/** `file:./content.db` (Prisma/libsql-style DATABASE_URL) → `./content.db`. */
+export function stripFilePrefix(filename: string): string {
+  return filename.replace(/^file:(\/\/)?/i, "");
+}
+
 export async function openBetterStarlite(
-  filename: string,
+  rawFilename: string,
   wal = true,
 ): Promise<DatabaseClient> {
+  const filename = stripFilePrefix(rawFilename);
   if (useWorkerPool(filename)) return openWorkerPoolClient(filename, wal);
   const { createDatabase } = await loadDriver();
   const db = await createDatabase(filename, { disableWAL: !wal });

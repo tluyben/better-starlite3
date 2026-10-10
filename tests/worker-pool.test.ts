@@ -224,3 +224,35 @@ describe("DB_READ_WORKERS / DB_WORKERS parsing", () => {
     assert.equal(workersEnabled({ DB_WORKERS: "0" }), false);
   });
 });
+
+describe("filename and parent flags", () => {
+  it("a file: prefix (DATABASE_URL=\"file:./x.db\") opens ./x.db, workers and in-process", async () => {
+    for (const workers of ["on", "0"]) {
+      process.env.DB_WORKERS = workers;
+      try {
+        const name = `prefixed-${workers}.db`;
+        const db = await open({ driver: "better-starlite", filename: `file:${join(dir, name)}`, slowQuery: false });
+        await db.execute({ sql: "CREATE TABLE p (n INTEGER)" });
+        db.destroy();
+        const again = await openFile(name);
+        const r = await again.query({ sql: "SELECT count(*) FROM p" });
+        assert.deepEqual(r.results[0].rows, [[0]]);
+        again.destroy();
+      } finally {
+        delete process.env.DB_WORKERS;
+      }
+    }
+  });
+
+  it("works when the parent runs with --input-type=module", () => {
+    const code = `
+      const { open } = await import(${JSON.stringify(new URL("../src/index.js", import.meta.url).pathname)});
+      const db = await open({ driver: "better-starlite", filename: ${JSON.stringify(join(dir, "esm.db"))}, slowQuery: false });
+      const r = await db.query({ sql: "SELECT 41 + 1" });
+      console.log("answer", r.results[0].rows[0][0]);
+    `;
+    const res = spawnSync(process.execPath, ["--import", "tsx/esm", "--input-type=module", "-e", code], { timeout: 15_000, encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /answer 42/);
+  });
+});

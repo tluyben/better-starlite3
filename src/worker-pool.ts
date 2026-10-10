@@ -183,7 +183,13 @@ class SqliteWorker {
   get load() { return this.inflight; }
 
   private spawn() {
-    const w = new Worker(WORKER_SOURCE, { eval: true, workerData: { ...this.data, role: this.role } });
+    const w = new Worker(WORKER_SOURCE, {
+      eval: true,
+      workerData: { ...this.data, role: this.role },
+      // The source is CommonJS; a parent started with --input-type=module (or a
+      // module default type) would otherwise run it as ESM, where require is undefined.
+      execArgv: process.execArgv.filter((a) => !/^--(input-type|experimental-default-type)\b/.test(a)),
+    });
     this.worker = w;
     let started = false;
     this.ready = new Promise<void>((resolve, reject) => {

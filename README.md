@@ -211,6 +211,10 @@ therefore runs a local database file on worker threads:
 | `DB_WORKER_SPIN_US` | `200` | µs a worker keeps polling for the next query before sleeping |
 | `BETTER_SQLITE3_PATH` | resolved from `process.cwd()` | better-sqlite3 module the workers load |
 
+A `file:` prefix on the filename (`DATABASE_URL="file:./content.db"`) is stripped.
+Bundlers (Next inlines the library when it is symlinked from `3rdparty/`) are fine:
+the worker code is created from a string, not loaded from a file.
+
 Not on workers: better-starlite's own replication (`SHAREFILES_URL` + `REPLICA`),
 remote URLs (`http(s)://`, `flexdb://`) and Bun — those keep the in-process path.
 Container-level WAL replication (a tailer shipping the `-wal` file) is unaffected.
