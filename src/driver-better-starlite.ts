@@ -3,6 +3,11 @@ import type { DatabaseClient } from "./types.js";
 import { warnIfUnsupported } from "./warnings.js";
 import { makeQueryResponse, objectRowsToResult, arrayRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForBetterSqlite3 } from "./params.js";
+import { AsyncMutex } from "./mutex.js";
+
+/** Statements that only read. Everything else takes the write lock. */
+const READ_ONLY = /^\s*(?:select|explain)\b/i;
+const isRead = (stmts: Statement[]) => stmts.every((s) => READ_ONLY.test(s.sql));
 
 async function loadDriver(): Promise<{
   createDatabase: (filename: string, options: Record<string, unknown>) => Promise<BetterStarliteDB>;
@@ -79,7 +84,7 @@ async function execStatement(
   );
 }
 
-function buildTransactionHandle(db: BetterStarliteDB): TransactionHandle {
+function buildTransactionHandle(db: BetterStarliteDB, writeMu: AsyncMutex): TransactionHandle {
   const pending: Statement[] = [];
   let done = false;
   const id = `bsl-tx-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -104,13 +109,18 @@ function buildTransactionHandle(db: BetterStarliteDB): TransactionHandle {
       if (done) throw new Error("Transaction already closed");
       done = true;
       const stmtsToRun = [...pending];
-      const wrappedFn = await db.transaction(async () => {
-        for (const s of stmtsToRun) {
-          await execStatement(db, s);
-        }
+      // Under the write lock: the transaction body awaits between statements, and a
+      // plain write from another request landing in that gap would join (and roll back
+      // with) this transaction on the shared connection.
+      return writeMu.run(async () => {
+        const wrappedFn = await db.transaction(async () => {
+          for (const s of stmtsToRun) {
+            await execStatement(db, s);
+          }
+        });
+        await wrappedFn();
+        return { status: "committed" as const, transaction_id: id, raft_index: 0 };
       });
-      await wrappedFn();
-      return { status: "committed" as const, transaction_id: id, raft_index: 0 };
     },
 
     async rollback() {
@@ -132,31 +142,37 @@ export async function openBetterStarlite(
 ): Promise<DatabaseClient> {
   const { createDatabase } = await loadDriver();
   const db = await createDatabase(filename, { disableWAL: !wal });
+  // One writer at a time, like the better-sqlite3 driver: writes and transaction
+  // commits are serialised; pure reads are not (WAL allows concurrent readers).
+  const writeMu = new AsyncMutex();
 
   const client: DatabaseClient = {
     driver: "better-starlite",
 
     async query(statements, _consistency?) {
       const stmts = Array.isArray(statements) ? statements : [statements];
-      return makeQueryResponse(
+      const run = async () => makeQueryResponse(
         await Promise.all(stmts.map((s) => execStatement(db, s))),
         "better-starlite",
       );
+      return isRead(stmts) ? run() : writeMu.run(run);
     },
 
     async execute(statements) {
       const stmts = Array.isArray(statements) ? statements : [statements];
-      const results: import("flexdb-node").StatementResult[] = [];
-      for (const s of stmts) results.push(await execStatement(db, s));
-      return makeQueryResponse(results, "better-starlite");
+      return writeMu.run(async () => {
+        const results: import("flexdb-node").StatementResult[] = [];
+        for (const s of stmts) results.push(await execStatement(db, s));
+        return makeQueryResponse(results, "better-starlite");
+      });
     },
 
     async beginTransaction() {
-      return buildTransactionHandle(db);
+      return buildTransactionHandle(db, writeMu);
     },
 
     transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
-      const tx = buildTransactionHandle(db);
+      const tx = buildTransactionHandle(db, writeMu);
       return fn(tx)
         .then((result) => tx.commit().then(() => result))
         .catch(async (err) => {
