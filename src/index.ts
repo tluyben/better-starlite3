@@ -42,12 +42,26 @@ export type {
 } from "./types.js";
 
 import type { DatabaseClient, OpenOptions } from "./types.js";
-import { openBetterSQLite3, wrapBetterSQLite3 } from "./driver-better-sqlite3.js";
+import { openBetterSQLite3, wrapBetterSQLite3 as wrapBetterSQLite3Raw } from "./driver-better-sqlite3.js";
 import { openBestSQLite3 } from "./driver-best-sqlite3.js";
 import { openFlexDB } from "./driver-flexdb.js";
 import { openBetterStarlite } from "./driver-better-starlite.js";
 
-export { wrapBetterSQLite3 };
+import { withSlowQueryDetection, type SlowQueryOptions } from "./slow-query.js";
+
+export type { SlowQueryOptions, SlowQueryEvent } from "./slow-query.js";
+export { fingerprintSql, flushSauromon } from "./slow-query.js";
+
+/**
+ * Wrap an already-open better-sqlite3 Database in the unified client (with
+ * slow-query detection, see `open()`). Pass `{ slowQuery: false }` to opt out.
+ */
+export function wrapBetterSQLite3(
+  db: import("better-sqlite3").Database,
+  extra: { slowQuery?: SlowQueryOptions | false } = {},
+): DatabaseClient {
+  return withSlowQueryDetection(wrapBetterSQLite3Raw(db), extra.slowQuery);
+}
 
 /**
  * Open a database connection using one of the three supported drivers.
@@ -88,7 +102,15 @@ export { wrapBetterSQLite3 };
  * db.destroy();
  * ```
  */
-export async function open(options: OpenOptions): Promise<DatabaseClient> {
+export async function open(
+  options: OpenOptions & { slowQuery?: SlowQueryOptions | false },
+): Promise<DatabaseClient> {
+  // Every client times its statements and reports slow ones (SauroMON when the
+  // SAUROMON_* env is set, and/or options.slowQuery.onSlowQuery). See slow-query.ts.
+  return withSlowQueryDetection(await openDriver(options), options.slowQuery);
+}
+
+async function openDriver(options: OpenOptions): Promise<DatabaseClient> {
   switch (options.driver) {
     case "better-sqlite3":
       return openBetterSQLite3(options.filename, options.wal ?? true);
