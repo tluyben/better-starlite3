@@ -185,11 +185,54 @@ This is translated internally for each driver:
 - **best-sqlite3** — rewritten to `$p1`, `$p2` named params
 - **flexdb** — passed through unchanged
 
+## Worker threads (default for `better-starlite`)
+
+better-sqlite3 is synchronous: behind an async API it still runs on the Node main
+thread, so one slow statement (an unindexed scan of a big table) freezes every
+request, timer and health check in the process. The `better-starlite` driver
+therefore runs a local database file on worker threads:
+
+- **1 writer thread** — every write, transaction commit, PRAGMA and DDL, in order.
+  One thread means one total order: no lost or interleaved writes.
+- **N reader threads** (default **3**, all started at `open()`) — `SELECT` /
+  `EXPLAIN` / `WITH` statements, on separate WAL connections. A read that starts
+  after a write's promise resolved sees that write. A reader that finds a
+  statement writes (`WITH … INSERT`) hands it to the writer.
+- `:memory:` and `wal: false` databases get no readers (the writer does
+  everything, still off the main thread).
+- Same API, results and error codes (`err.code === "SQLITE_CONSTRAINT_UNIQUE"`),
+  Buffers for blobs, positional rows. The process still exits on its own: workers
+  only hold it open while a query is in flight.
+
+| Env | Default | |
+|---|---|---|
+| `DB_WORKERS` | on | `0` / `off` = run in-process as before |
+| `DB_READ_WORKERS` | `3` | reader threads (0–32); raise it for read-heavy apps |
+| `DB_WORKER_SPIN_US` | `200` | µs a worker keeps polling for the next query before sleeping |
+| `BETTER_SQLITE3_PATH` | resolved from `process.cwd()` | better-sqlite3 module the workers load |
+
+Not on workers: better-starlite's own replication (`SHAREFILES_URL` + `REPLICA`),
+remote URLs (`http(s)://`, `flexdb://`) and Bun — those keep the in-process path.
+Container-level WAL replication (a tailer shipping the `-wal` file) is unaffected.
+
+Cost and gain, measured (1M-row table, Node 22, 10-core VM):
+
+| | in-process | workers |
+|---|---|---|
+| sequential point read | ~70 µs | ~140–210 µs (thread wake-up) |
+| parallel point reads | ~17.5k/s | ~18–27k/s |
+| main thread frozen during a 160 ms scan | 162 ms | 6 ms |
+| other queries served during that scan | 2 | 340–770 |
+
+Slow statements are still reported (see slow-query detection): `time_ns` is the
+worker's execution time, without queue wait.
+
 ## Write serialisation (mutex)
 
 `better-sqlite3` and `best-sqlite3` automatically serialise all write operations
 (`execute()` and transaction `commit()`) through a per-connection async mutex.
-`better-starlite` uses its own internal per-file write mutex.
+`better-starlite` serialises writes on its single writer thread (or, with
+`DB_WORKERS=0`, a per-connection mutex).
 This means it is safe to fire concurrent writes without coordinating callers:
 
 ```ts

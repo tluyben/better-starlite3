@@ -4,6 +4,7 @@ import { warnIfUnsupported } from "./warnings.js";
 import { makeQueryResponse, objectRowsToResult, arrayRowsToResult, emptyResult, hrNow, elapsed } from "./result.js";
 import { convertParamsForBetterSqlite3 } from "./params.js";
 import { AsyncMutex } from "./mutex.js";
+import { SqliteWorkerPool, workersEnabled, readerCount } from "./worker-pool.js";
 
 /** Statements that only read. Everything else takes the write lock. */
 const READ_ONLY = /^\s*(?:select|explain)\b/i;
@@ -136,10 +137,23 @@ function buildTransactionHandle(db: BetterStarliteDB, writeMu: AsyncMutex): Tran
   };
 }
 
+/**
+ * better-starlite's own replication (SHAREFILES_URL + REPLICA) and remote URLs
+ * (rqlite http(s)://, flexdb://) stay on better-starlite. A plain local file runs
+ * on the off-main-thread worker pool (see worker-pool.ts) unless DB_WORKERS=0.
+ */
+function useWorkerPool(filename: string, env = process.env): boolean {
+  if (!workersEnabled(env)) return false;
+  if (/^(https?|flexdb):\/\//i.test(filename)) return false;
+  if (env.SHAREFILES_URL && /^(1|true|yes|on)$/i.test(env.REPLICA ?? "")) return false;
+  return typeof (globalThis as { Bun?: unknown }).Bun === "undefined";
+}
+
 export async function openBetterStarlite(
   filename: string,
   wal = true,
 ): Promise<DatabaseClient> {
+  if (useWorkerPool(filename)) return openWorkerPoolClient(filename, wal);
   const { createDatabase } = await loadDriver();
   const db = await createDatabase(filename, { disableWAL: !wal });
   // One writer at a time, like the better-sqlite3 driver: writes and transaction
@@ -183,6 +197,86 @@ export async function openBetterStarlite(
 
     destroy() {
       db.close();
+    },
+  };
+  return client;
+}
+
+/** Same client contract as the in-process driver, executed on worker threads. */
+async function openWorkerPoolClient(filename: string, wal: boolean): Promise<DatabaseClient> {
+  const pool = await SqliteWorkerPool.open({
+    filename,
+    wal,
+    readers: readerCount(),
+    synchronous: process.env.BETTER_STARLITE_SYNCHRONOUS?.trim().toUpperCase() || undefined,
+  });
+  const respond = (results: import("flexdb-node").StatementResult[]) => makeQueryResponse(results, "better-starlite");
+
+  function txHandle(): TransactionHandle {
+    const pending: Statement[] = [];
+    let done = false;
+    const id = `bsl-tx-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const add = async (stmts: Statement | Statement[]) => {
+      if (done) throw new Error("Transaction already closed");
+      for (const s of Array.isArray(stmts) ? stmts : [stmts]) { warnIfUnsupported(s.sql, "better-starlite"); pending.push(s); }
+      return respond([]);
+    };
+    return {
+      id,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      query: (stmts, _consistency?) => add(stmts),
+      execute: (stmts) => add(stmts),
+      async commit() {
+        if (done) throw new Error("Transaction already closed");
+        done = true;
+        // The writer worker runs the whole batch in one SQLite transaction; nothing
+        // else can interleave because the writer handles one message at a time.
+        if (pending.length) await pool.transaction(pending);
+        return { status: "committed" as const, transaction_id: id, raft_index: 0 };
+      },
+      async rollback() {
+        if (done) throw new Error("Transaction already closed");
+        done = true;
+        pending.length = 0;
+        return { status: "rolled_back" as const, transaction_id: id };
+      },
+      enqueue(): never {
+        throw new Error("[better-starlite3] honker is only available with the flexdb driver");
+      },
+    };
+  }
+
+  const client: DatabaseClient = {
+    driver: "better-starlite",
+
+    async query(statements, _consistency?) {
+      const stmts = Array.isArray(statements) ? statements : [statements];
+      stmts.forEach((s) => warnIfUnsupported(s.sql, "better-starlite"));
+      return respond(await pool.run(stmts));
+    },
+
+    async execute(statements) {
+      const stmts = Array.isArray(statements) ? statements : [statements];
+      stmts.forEach((s) => warnIfUnsupported(s.sql, "better-starlite"));
+      return respond(await pool.write(stmts));
+    },
+
+    async beginTransaction() {
+      return txHandle();
+    },
+
+    transaction<T>(fn: (tx: TransactionHandle) => Promise<T>): Promise<T> {
+      const tx = txHandle();
+      return fn(tx)
+        .then((result) => tx.commit().then(() => result))
+        .catch(async (err) => {
+          try { await tx.rollback(); } catch { /* ignore */ }
+          throw err;
+        });
+    },
+
+    destroy() {
+      pool.close();
     },
   };
   return client;
